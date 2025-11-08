@@ -2,20 +2,24 @@
     mediator.lua
     
     A lightweight mediator pattern implementation with:
+    - Singleton pattern for global access
     - Named parameters for improved readability
     - Multiple return values with default fallbacks
     
     @module Mediator
     @author iThorgrim
     @license AGL v3
-    @version 2.0-sync
+    @version 2.0
 ]]
 
-local Object = require "classic"
+local Object = Object or require("classic")
 
 ---@class Mediator
 ---@field private events table<string, table> Registered callbacks by event name
 local Mediator = Object:extend()
+
+-- Singleton instance
+local Instance = nil
 
 ---
 --- Initializes a new Mediator instance.
@@ -24,6 +28,19 @@ local Mediator = Object:extend()
 ---
 function Mediator:new()
     self.events = {}
+end
+
+---
+--- Gets the singleton instance of the Mediator.
+--- Creates the instance on first call.
+---
+--- @return Mediator The singleton instance
+---
+function Mediator.GetInstance()
+    if not Instance then
+        Instance = Mediator()
+    end
+    return Instance
 end
 
 ---
@@ -175,7 +192,7 @@ end
 -- GLOBAL API
 -- =============================================================================
 
-local mediatorInstance = Mediator()
+local mediatorInstance = Mediator.GetInstance()
 
 ---
 --- Global Mediator API for convenient access.
