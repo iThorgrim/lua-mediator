@@ -254,10 +254,10 @@ _G.Mediator = {
 ---
 function RegisterMediatorEvent(eventName, callback)
     if type(callback) == "function" then
-        Mediator.Register(eventName, callback)
+        mediatorInstance:Register(eventName, callback)
     else
         return function(cb)
-            Mediator.Register(eventName, cb)
+            mediatorInstance:Register(eventName, cb)
         end
     end
 end
