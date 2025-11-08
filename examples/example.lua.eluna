@@ -1,0 +1,305 @@
+--[[
+    Mediator Usage Examples
+    
+    Minimal examples demonstrating mediator patterns for ALE / Eluna usage.
+    
+    @author iThorgrim
+]]
+
+require("mediator")
+
+-- =============================================================================
+-- EXAMPLE 1: SIMPLE VALIDATION
+-- =============================================================================
+
+--[[
+    Use case: Validate player login with a level requirement
+    
+    A single callback checks if the player meets the minimum level.
+]]
+
+RegisterMediatorEvent("Validate_Login", function(player)
+    if player:GetLevel() < 10 then
+        return false, "Minimum level required: 10"
+    end
+    return true, "Welcome!"
+end)
+
+-- Hook into PLAYER_EVENT_ON_LOGIN (3)
+local function OnPlayerLogin(event, player)
+    local canLogin, message = Mediator.On("Validate_Login", {
+        arguments = {player},
+        defaults = {false, "Unknown error"}
+    })
+    
+    if not canLogin then
+        player:SendBroadcastMessage("Access denied: " .. message)
+        player:KickPlayer()
+    else
+        player:SendBroadcastMessage(message)
+    end
+end
+
+RegisterPlayerEvent(3, OnPlayerLogin)
+
+-- =============================================================================
+-- EXAMPLE 2: MULTIPLE VALIDATORS (CHAIN)
+-- =============================================================================
+
+--[[
+    Use case: Multiple checks for player actions
+    
+    Each validator returns nil to pass control to the next one,
+    or false to block the action immediately.
+]]
+
+-- First check: Level requirement
+RegisterMediatorEvent("Can_Enter_Zone", function(player, zoneId)
+    if player:GetLevel() < 20 then
+        return false, "Level 20 required"
+    end
+    return nil  -- Pass to next validator
+end)
+
+-- Second check: Quest requirement
+RegisterMediatorEvent("Can_Enter_Zone", function(player, zoneId)
+    local hasQuest = false  -- player:HasQuest(1234) in real implementation
+    if not hasQuest then
+        return false, "Quest required"
+    end
+    return nil  -- Pass to next validator
+end)
+
+-- Final check: Allow if all passed
+RegisterMediatorEvent("Can_Enter_Zone", function(player, zoneId)
+    return true, "Access granted"
+end)
+
+-- Hook into PLAYER_EVENT_ON_UPDATE_ZONE (27)
+local RESTRICTED_ZONE = 1234
+
+local function OnUpdateZone(event, player, newZone, newArea)
+    if newZone == RESTRICTED_ZONE then
+        local canEnter, message = Mediator.On("Can_Enter_Zone", {
+            arguments = {player, newZone},
+            defaults = {false, "Access denied"}
+        })
+        
+        if not canEnter then
+            player:SendBroadcastMessage(message)
+            player:Teleport(0, 0, 0, 0, 0)  -- Teleport to safe location
+        end
+    end
+end
+
+RegisterPlayerEvent(27, OnUpdateZone)
+
+-- =============================================================================
+-- EXAMPLE 3: DAMAGE MODIFICATION
+-- =============================================================================
+
+--[[
+    Use case: Multiple sources modify damage dealt
+    
+    Each callback can modify the damage. The first non-nil value is used.
+]]
+
+-- Modifier 1: Critical hit bonus
+RegisterMediatorEvent("Calculate_Damage", function(player, target, baseDamage)
+    if math.random(100) <= 10 then  -- 10% crit chance
+        return baseDamage * 2, true  -- Double damage, crit flag
+    end
+    return nil  -- No crit, pass through
+end)
+
+-- Modifier 2: Buff bonus
+RegisterMediatorEvent("Calculate_Damage", function(player, target, baseDamage)
+    if player:HasAura(12345) then  -- Has damage buff
+        return baseDamage * 1.5, false  -- 50% more damage
+    end
+    return nil
+end)
+
+-- Modifier 3: Default (no modification)
+RegisterMediatorEvent("Calculate_Damage", function(player, target, baseDamage)
+    return baseDamage, false  -- Return original damage
+end)
+
+-- Hook into PLAYER_EVENT_ON_DAMAGE (66)
+local function OnDamage(event, player, target, damage)
+    local finalDamage, isCrit = Mediator.On("Calculate_Damage", {
+        arguments = {player, target, damage},
+        defaults = {damage, false}
+    })
+    
+    if isCrit then
+        player:SendBroadcastMessage("Critical hit! " .. finalDamage .. " damage!")
+    end
+    
+    return finalDamage  -- Return modified damage
+end
+
+RegisterPlayerEvent(66, OnDamage)
+
+-- =============================================================================
+-- EXAMPLE 4: MULTIPLE RETURN VALUES WITH DEFAULTS
+-- =============================================================================
+
+--[[
+    Use case: Calculate various bonuses from different sources
+    
+    Each callback returns specific bonuses. Nil values use defaults.
+]]
+
+-- Guild bonus: +100 stamina
+RegisterMediatorEvent("Calculate_Bonuses", function(player)
+    if player:IsInGuild() then
+        return nil, 100, nil  -- Only stamina bonus
+    end
+    return nil
+end)
+
+-- Achievement bonus: +50 strength
+RegisterMediatorEvent("Calculate_Bonuses", function(player)
+    local hasAchievement = false  -- player:HasAchievement(1234)
+    if hasAchievement then
+        return 50, nil, nil  -- Only strength bonus
+    end
+    return nil
+end)
+
+-- Item bonus: +25 intellect
+RegisterMediatorEvent("Calculate_Bonuses", function(player)
+    if player:HasItem(54321) then
+        return nil, nil, 25  -- Only intellect bonus
+    end
+    return nil
+end)
+
+-- Hook into PLAYER_EVENT_ON_LEVEL_CHANGE (13)
+local function OnLevelChange(event, player, oldLevel)
+    local str, sta, int = Mediator.On("Calculate_Bonuses", {
+        arguments = {player},
+        defaults = {0, 0, 0}  -- No bonus by default
+    })
+    
+    if str > 0 or sta > 0 or int > 0 then
+        player:SendBroadcastMessage(string.format(
+            "Bonuses - STR: +%d, STA: +%d, INT: +%d",
+            str, sta, int
+        ))
+    end
+end
+
+RegisterPlayerEvent(13, OnLevelChange)
+
+-- =============================================================================
+-- EXAMPLE 5: CUSTOM LOOT SYSTEM
+-- =============================================================================
+
+--[[
+    Use case: Multiple sources determine loot rewards
+    
+    Each callback can add items to the loot table.
+]]
+
+-- Base loot: Always give gold
+RegisterMediatorEvent("Generate_Loot", function(player, creatureId)
+    local goldAmount = math.random(10, 50)
+    return goldAmount, nil, nil
+end)
+
+-- Rare drop: 10% chance for special item
+RegisterMediatorEvent("Generate_Loot", function(player, creatureId)
+    if math.random(100) <= 10 then
+        return nil, 12345, nil  -- Special item ID
+    end
+    return nil
+end)
+
+-- Quest item: If player has quest
+RegisterMediatorEvent("Generate_Loot", function(player, creatureId)
+    if player:HasQuest(9999) then
+        return nil, nil, 54321  -- Quest item ID
+    end
+    return nil
+end)
+
+-- Hook into PLAYER_EVENT_ON_KILL_CREATURE (7)
+local function OnKillCreature(event, player, creature)
+    local gold, itemId, questItemId = Mediator.On("Generate_Loot", {
+        arguments = {player, creature:GetEntry()},
+        defaults = {0, nil, nil}
+    })
+    
+    if gold > 0 then
+        player:ModifyMoney(gold)
+        player:SendBroadcastMessage("You received " .. gold .. " copper")
+    end
+    
+    if itemId then
+        player:AddItem(itemId, 1)
+        player:SendBroadcastMessage("You received a rare item!")
+    end
+    
+    if questItemId then
+        player:AddItem(questItemId, 1)
+        player:SendBroadcastMessage("Quest item obtained!")
+    end
+end
+
+RegisterPlayerEvent(7, OnKillCreature)
+
+-- =============================================================================
+-- DEBUGGING: Check registered callbacks
+-- =============================================================================
+
+--[[
+    Optional: Check how many callbacks are registered
+]]
+
+local function OnPlayerCommand(event, player, command)
+    if command == "mediator info" then
+        local total = Mediator.GetCallbackCount()
+        player:SendBroadcastMessage("Total registered callbacks: " .. total)
+        return false
+    end
+end
+
+RegisterPlayerEvent(42, OnPlayerCommand)
+
+-- =============================================================================
+-- NOTES
+-- =============================================================================
+
+--[[
+    KEY CONCEPTS:
+    
+    1. NAMED PARAMETERS:
+       Mediator.On("Event", {
+           arguments = {player, data},  -- Arguments to pass to callbacks
+           defaults = {false, 0}        -- Default values for returns
+       })
+    
+    2. SYNCHRONOUS EXECUTION:
+       - All callbacks execute immediately
+       - No delays, no waiting, no coroutines
+       - Perfect for instant calculations and validations
+    
+    3. RETURN VALUE MERGING:
+       - Multiple callbacks can return values
+       - For each position, first non-nil value is used
+       - If all return nil, default value is used
+    
+    4. CALLBACKS ORDER:
+       - Execute in registration order
+       - All callbacks run (no short-circuit)
+       - First non-nil wins per return position
+    
+    5. USE CASES:
+       - Validation chains
+       - Damage/stat calculations
+       - Loot generation
+       - Permission checks
+       - Any instant computation
+]]
